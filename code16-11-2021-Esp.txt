@@ -1,0 +1,241 @@
+#include <WiFi.h>
+#include "esp_adc_cal.h" 
+#include <Adafruit_MPU6050.h>
+#include <Adafruit_Sensor.h>
+#include <Wire.h>
+#define LM35_Sensor1 35   //lm35
+
+WiFiClient client;
+
+Adafruit_MPU6050 mpu;
+
+int LM35_Raw_Sensor1 = 0;
+float LM35_TempC_Sensor1 = 0.0;
+
+float Voltage = 0.0;
+
+///Thingworx data sending
+
+const char* ssid = "Nazmul";
+const char* password = "okey2021";
+//const char* host = "172.16.78.20"; //http://dcs.glaitm.org/
+const char* host = "dcs.glaitm.org";
+
+const int httpsPort = 7080;
+
+
+const char Thing[] = "smart_ev_project_arefin";
+const char Property1[] = "Engine_Temp";
+const char Property2[] = "gx";
+const char Property3[] = "gy";
+const char Property4[] = "gz";
+const char Property5[] = "latitude";
+const char Property6[] = "longiitude";
+const char Property7[] = "Rem_Battery_level";
+const char Property8[] = "traversed_Distance";
+const char Property9[] = "velocity";
+
+
+
+void Put(String ThingName, String ThingProperty, String Value)
+  {
+
+    Serial.println(host);
+  if (!client.connect(host, httpsPort))
+ {
+    Serial.println("connection failed");
+    return;
+  } else
+
+ {
+    Serial.println("Connected to ThingWorx.");
+  }
+  String url = "/Thingworx/Things/" + ThingName + "/Properties/" + ThingProperty; 
+  Serial.print("requesting URL: ");
+  Serial.println(url);
+
+  String strPUTReqVal = "{\"" + ThingProperty + "\":\"" + Value + "\"}";  
+  Serial.print("PUT Value: ");
+  Serial.println(strPUTReqVal);
+
+  client.print(String("PUT ") + url + " HTTP/1.1\r\n" +
+               "Host: " + host + "\r\n" +
+               "appKey: 81526db1-13ec-42e1-8453-66e4608a9e32" + "\r\n" +
+               "x-thingworx-session: false" + "\r\n" +
+               "Accept: application/json" + "\r\n" +
+               "Connection: close" + "\r\n" +
+               "Content-Type: application/json" + "\r\n" +
+               "Content-Length: " + String(strPUTReqVal.length()) + "\r\n\r\n" +
+               strPUTReqVal + "\r\n\r\n");   
+
+  while (client.connected()) 
+{
+    String line = client.readStringUntil('\r');
+    Serial.print(line);
+  }
+  client.stop();
+}
+
+
+
+void setup() {
+  Serial.begin(9600);
+  Wire.begin(21, 22);//i2c com
+  
+
+
+
+
+
+  // Try to initialize!
+ /* if (!mpu.begin()) {
+    Serial.println("Failed to find MPU6050 chip");
+    while (1) {
+      delay(10);
+    }
+  }*/
+  Serial.println("MPU6050 Found!");
+
+  mpu.setAccelerometerRange(MPU6050_RANGE_8_G);  
+  mpu.setGyroRange(MPU6050_RANGE_500_DEG);
+  mpu.setFilterBandwidth(MPU6050_BAND_5_HZ);
+  
+  delay(100);
+ 
+////wifi
+
+Serial.print("connecting to ");
+  Serial.println(ssid);
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED)
+ {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println("");
+  Serial.println("WiFi connected");
+  Serial.println("IP address: ");
+  Serial.println(WiFi.localIP());
+
+  
+}
+
+
+void loop() {
+   
+    gyro();    
+    lm35();
+    
+    
+    Serial.print("data= "); 
+    Wire.requestFrom(8, 40);
+    String DATA;
+  
+    while (Wire.available()>0)
+    {
+      char c = Wire.read();
+      DATA += c; 
+        
+    } 
+    Serial.println(DATA);
+    char array[40];
+    DATA.toCharArray(array,40);
+    char *strings[5]; 
+    char *ptr = NULL;   
+    byte index = 0;
+    ptr = strtok(array, ",");
+    while (ptr != NULL)
+    {
+      strings[index] = ptr;
+      index++;
+      ptr = strtok(NULL, ",");
+    }
+    Serial.println(strings[0]);
+    Serial.println(strings[1]);
+    Serial.println(strings[2]);
+    Serial.println(strings[3]);
+    Serial.println(strings[4]);
+    Put(Thing,Property5,strings[1]); 
+    Put(Thing,Property6,strings[2]); 
+    Put(Thing,Property7,strings[0]); 
+    Put(Thing,Property8,strings[3]); 
+    Put(Thing,Property9,strings[4]);
+    
+   
+ 
+}
+
+float lm35()
+{
+float LM35_TempC_Sensor1_av=0;
+  for(int i=0;i<400;i++)
+{
+  LM35_Raw_Sensor1 = analogRead(LM35_Sensor1);  
+  // Calibrate ADC & Get Voltage (in mV)
+  Voltage = readADC_Cal(LM35_Raw_Sensor1);
+  // TempC = Voltage(mV) / 10
+  LM35_TempC_Sensor1 = Voltage / 10;
+  LM35_TempC_Sensor1_av = LM35_TempC_Sensor1_av + LM35_TempC_Sensor1;
+}
+LM35_TempC_Sensor1_av = LM35_TempC_Sensor1_av/400;
+
+  // Print The Readings
+  Serial.print("Temperature = ");
+  Serial.print(LM35_TempC_Sensor1_av);
+  Serial.print(" °C , ");
+  Serial.println("   ");
+
+  Put(Thing,Property1,String(LM35_TempC_Sensor1_av)); 
+  Serial.println(" ");
+
+ 
+}
+
+uint32_t readADC_Cal(int ADC_Raw)
+{
+  esp_adc_cal_characteristics_t adc_chars;
+  
+  esp_adc_cal_characterize(ADC_UNIT_1, ADC_ATTEN_DB_11, ADC_WIDTH_BIT_12, 1100, &adc_chars);
+  return(esp_adc_cal_raw_to_voltage(ADC_Raw, &adc_chars));
+}
+
+//----lm35 end
+
+void gyro(){
+  
+  /* Get new sensor events with the readings */
+  sensors_event_t a, g, temp;
+  mpu.getEvent(&a, &g, &temp);
+
+  /* Print out the values */
+  Serial.print("Acceleration X: ");
+  Serial.print(a.acceleration.x+1.65);
+  Serial.print(", Y: ");
+  Serial.print(a.acceleration.y+0.06);
+  Serial.print(", Z: ");
+  Serial.print(a.acceleration.z-9.46);
+  Serial.println(" m/s^2");
+
+  Serial.print("Rotation X: ");
+  Serial.print(g.gyro.x+0.03);
+  float gx=g.gyro.x+0.03;
+  Serial.print(", Y: ");
+  Serial.print(g.gyro.y+0.06);
+  float gy =g.gyro.y+0.06;
+  Serial.print(", Z: ");
+  Serial.print(g.gyro.z-0.02);
+  float gz =g.gyro.z-0.02;
+  
+  Serial.println(" rad/s");
+
+  Serial.print("Temperature: ");
+  Serial.print(temp.temperature);
+  Serial.println(" degC");
+
+  Serial.println("");
+  delay(500);
+  Put(Thing,Property2,String(gx)); 
+  Put(Thing,Property3,String(gy)); 
+  Put(Thing,Property3,String(gz)); 
+  
+}
